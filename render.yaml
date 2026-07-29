@@ -1,0 +1,49 @@
+# ============================================================
+# VerinX · Render Blueprint 配置
+# 文档：https://render.com/docs/blueprint-spec
+# 用法：在 Render Dashboard → New → Blueprint → 选择本仓库
+# ============================================================
+
+services:
+  # ---------- 后端 Web Service ----------
+  - type: web
+    name: verinx-api
+    runtime: python
+    plan: free
+    region: singapore  # 新加坡节点，国内访问较快
+    rootDir: backend
+    buildCommand: pip install --no-cache-dir -r requirements-deploy.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # 数据库：使用 Render 提供的免费 PostgreSQL（需先在 Dashboard 创建）
+      # 也可使用 SQLite 文件存储（/data 目录持久化）
+      - key: DATABASE_URL
+        value: sqlite:///./verinx.db
+      - key: DEBUG
+        value: false
+      - key: APP_NAME
+        value: VerinX·AI全真面试模拟
+      # JWT 密钥：部署前替换为 openssl rand -hex 32 生成的随机值
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      # 智谱 GLM-4-Flash（出题与评分，免费）
+      - key: ZHIPU_API_KEY
+        sync: false
+      # 豆包 API（可选）
+      - key: DOUBAO_API_KEY
+        sync: false
+      - key: DOUBAO_API_URL
+        value: https://ark.cn-beijing.volces.com/api/v3/chat/completions
+      # 百度语音识别（可选，有免费额度）
+      - key: BAIDU_API_KEY
+        sync: false
+      - key: BAIDU_SECRET_KEY
+        sync: false
+      # 允许的前端域名（多个用逗号分隔）
+      - key: CORS_ALLOW_ORIGINS
+        value: https://verinx.vercel.app,http://localhost:5173
+      # 文件上传目录（Render 持久磁盘挂载点）
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
