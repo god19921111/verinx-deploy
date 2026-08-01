@@ -1,22 +1,10 @@
-# ============================================================
-# VerinX · 后端 Render 部署轻量化依赖
-# 说明：Render 免费版 512MB 内存无法容纳 torch/funasr/modelscope
-#       故移除离线语音识别依赖，改用云端 ASR 或 mock 回退
-#       AI 评分（智谱 GLM-4-Flash）、题目生成、登录等核心功能不受影响
-# ============================================================
-
 # Web框架
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 
 # 数据库
 sqlalchemy==2.0.36
-asyncpg==0.30.0
-psycopg[binary]==3.2.3
 aiosqlite==0.20.0
-
-# Redis（可选，部署时如未配置则不强制）
-redis==5.2.1
 
 # 数据校验
 pydantic==2.10.4
@@ -27,7 +15,7 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.20
 
-# HTTP客户端（调用智谱GLM、百度ASR等）
+# HTTP客户端
 httpx==0.28.1
 
 # 文件处理
