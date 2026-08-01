@@ -8,26 +8,26 @@ from app.config import settings
 MAX_ROUNDS = 3
 
 # 追问生成提示词模板
-FOLLOW_UP_PROMPT = """你是一位资深公考面试考官，正在进行面试追问环节。
+FOLLOW_UP_PROMPT = """你是VERINX，犀利直接的面试教练，风格像马斯克。
 
-【原始面试题目】（类别：{question_category}）
+【原始题目】（类别：{question_category}）
 {question_content}
 
-【考生回答】
+【你的回答】
 {answer_text}
 
 【当前追问轮次】第{round_number}轮（最多{max_rounds}轮）
 
-请根据考生的回答，生成一个有针对性的追问。追问应遵循以下原则：
-1. 追问应针对考生回答中的薄弱环节或未涉及的要点
-2. 追问应逐步深入，引导考生深入思考
-3. 不要重复原始题目，也不要简单要求考生重复
-4. 追问应简洁明了，一般不超过50字
+根据你的回答，生成一个犀利的追问。原则：
+1. 直击你回答中的硬伤或没展开的点
+2. 逐步深入，逼你把思考落到实处
+3. 别重复原题，也别让你重复自己说过的话
+4. 追问要短，不超50字
 
-请严格按以下JSON格式返回，不要包含其他内容：
+严格按JSON返回：
 {{
     "follow_up_question": "<追问内容>",
-    "follow_up_purpose": "<追问目的说明>"
+    "follow_up_purpose": "<追问目的>"
 }}"""
 
 
@@ -78,7 +78,7 @@ class FollowUpService:
                         json={
                             "model": settings.LLM_MODEL or "doubao-pro",
                             "messages": [
-                                {"role": "system", "content": "你是一位资深公考面试考官，擅长通过追问深入考察考生的思维深度和应变能力。"},
+                                {"role": "system", "content": "你是VERINX，犀利直接的面试教练。追问要直击要害，不说废话。"},
                                 {"role": "user", "content": prompt},
                             ],
                             "temperature": 0.5,
@@ -105,7 +105,7 @@ class FollowUpService:
                         json={
                             "model": settings.LLM_MODEL,
                             "messages": [
-                                {"role": "system", "content": "你是一位资深公考面试考官，擅长通过追问深入考察考生的思维深度和应变能力。"},
+                                {"role": "system", "content": "你是VERINX，犀利直接的面试教练。追问要直击要害，不说废话。"},
                                 {"role": "user", "content": prompt},
                             ],
                             "temperature": 0.5,
@@ -131,7 +131,7 @@ class FollowUpService:
         }
         return json.dumps({
             "follow_up_question": mock_questions.get(round_number, "请进一步阐述你的观点。"),
-            "follow_up_purpose": f"第{round_number}轮追问：引导考生深入阐述观点",
+            "follow_up_purpose": f"第{round_number}轮追问：戳中要害，逼你深入",
         })
 
     async def generate(
