@@ -18,16 +18,7 @@ export function Layout() {
           <Link to="/" className="font-display text-xl tracking-[0.15em]">
             VERINX
           </Link>
-          <nav className="hidden md:flex items-center gap-10 text-xs uppercase-spacex text-[rgba(240,240,250,0.7)]">
-            <Link to="/practice/full" className="flex items-center gap-2 hover:text-[#F0F0FA] transition-spacex">
-              全真模拟
-              <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-spacex" />
-            </Link>
-            <Link to="/history" className="flex items-center gap-2 hover:text-[#F0F0FA] transition-spacex">
-              练习历史
-              <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-spacex" />
-            </Link>
-          </nav>
+          <nav className="hidden md:flex items-center gap-8 text-xs uppercase-spacex text-[rgba(240,240,250,0.7)]" />
           <div className="flex items-center gap-4">
             {isAuthenticated ? (
               <>
