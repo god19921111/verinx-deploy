@@ -1,19 +1,38 @@
+# ============================================================
+# VerinX · Hugging Face Spaces 后端 Dockerfile（根目录版）
+# 平台：Hugging Face Spaces (Docker SDK)
+# 免费配置：2核CPU + 16GB内存 + 50GB持久存储
+# 说明：backend/ 子目录包含完整后端代码，此 Dockerfile 负责构建
+# ============================================================
+
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libsndfile1 libgomp1 && rm -rf /var/lib/apt/lists/*
+# 系统依赖（funasr/torch 需要的音频处理库 + ffmpeg）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# 先复制 requirements 并安装依赖（利用 Docker 层缓存）
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN python -c "from funasr import AutoModel; AutoModel(model='iic/SenseVoiceSmall', vad_model='fsmn-vad', punc_model='ct-punc-c', device='cpu', disable_pbar=True, disable_log=True)" || echo "skip"
+# 预下载 FunASR SenseVoice 模型（避免运行时首次加载超时）
+RUN python -c "from funasr import AutoModel; AutoModel(model='iic/SenseVoiceSmall', vad_model='fsmn-vad', punc_model='ct-punc-c', device='cpu', disable_pbar=True, disable_log=True)" || echo "模型预下载失败，将在运行时按需加载"
 
+# 复制后端全部代码到 /app 根目录
 COPY backend/ .
 
+# 创建上传目录
 RUN mkdir -p /data/uploads
 ENV UPLOAD_DIR=/data/uploads
+
+# HF Spaces 强制使用 7860 端口
 ENV PORT=7860
 EXPOSE 7860
 
+# 启动命令
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
