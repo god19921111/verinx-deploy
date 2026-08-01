@@ -77,6 +77,12 @@ async def create_practice(
     current_user.daily_practice_count += 1
     current_user.total_practice_count += 1
 
+    # 将题目加入去重池，防止重复出题
+    from app.services.dedup import get_deduplicator
+    dedup = get_deduplicator()
+    if question and question.content:
+        dedup.add_question(question.content)
+
     await db.commit()
     await db.refresh(practice)
 
