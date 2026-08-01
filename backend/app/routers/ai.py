@@ -1,5 +1,7 @@
 """AI服务路由"""
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -509,362 +511,150 @@ async def generate_question(
     use_search: bool = True,
     current_user: User = Depends(get_current_user),
 ):
-    """使用AI生成面试题目（优先网络搜索最新真题，fallback智谱GLM，再fallback豆包）"""
-    import json
+    """
+    出题流程（纯本地，无联网）：
+    1. 本地真题库随机抽取（核心） → 2. 内置题库兜底
+    全流程去重检测
+    """
     import random
-    import re
+
+    from app.services.dedup import get_deduplicator
+    from app.services.real_questions import get_real_question_service
 
     categories = ["综合分析", "人际沟通", "应急应变", "组织管理", "自我认知"]
 
     if random_category:
         category = random.choice(categories)
 
-    # 优先从缓存池获取（毫秒级响应）
-    from app.services.question_pool import get_question_pool
-    pool = get_question_pool()
+    dedup = get_deduplicator()
 
-    cached = pool.get_question(category, exam_type, province)
-    if cached:
-        print(f"[出题] 缓存池命中: {category}, 剩余{pool.get_pool_status()[category]}道")
-        return cached
+    # ========== 1. 本地真题库随机抽取（核心） ==========
+    service = get_real_question_service()
+    for attempt in range(3):
+        result = service.get_question(category, exam_type, province)
+        if result and not dedup.is_duplicate(result["content"]):
+            dedup.add_question(result["content"])
+            print(f"[出题] 本地真题库命中，category={category}，attempt={attempt+1}")
+            return result
+        # 去重命中，换分类重试
+        remaining = [c for c in categories if c != category]
+        if remaining:
+            category = random.choice(remaining)
 
-    # 缓存池为空，尝试搜索生成
-    if use_search:
-        try:
-            from app.services.search_service import SearchService
-            search_service = SearchService()
-            search_result = await search_service.generate_question_with_search(category, exam_type, province)
-            if search_result:
-                print(f"[出题] 网络搜索成功获取题目: {category}")
-                return search_result
-        except Exception as e:
-            print(f"[出题] 网络搜索失败，回退到AI生成: {e}")
+    # ========== 2. 兜底：内置题库 ==========
+    print(f"[出题] 真题库耗尽或去重命中，走内置题库兜底 category={category}")
+    return _fallback_question(category, exam_type, province, dedup)
 
-    hot_topics = [
-        "高质量发展", "乡村振兴", "数字经济", "科技创新", "共同富裕",
-        "碳中和", "教育改革", "医疗健康", "就业创业", "社会治理",
-        "文化自信", "生态文明", "一带一路", "民生保障", "基层治理",
-        "数据安全", "人工智能", "新能源", "老龄化", "青年发展",
-    ]
 
-    random_topics = random.sample(hot_topics, 3)
+def _fallback_question(
+    category: str,
+    exam_type: str,
+    province: str,
+    dedup,
+) -> dict:
+    """兜底：内置丰富题库随机选题"""
+    import random
+    from app.services.real_questions import get_real_question_service
 
-    topic_descriptions = {
-        "高质量发展": "经济转型升级、产业升级、创新驱动",
-        "乡村振兴": "农村发展、农业现代化、农民增收",
-        "数字经济": "数字产业、数字化转型、数据要素",
-        "科技创新": "关键核心技术攻关、科技自立自强",
-        "共同富裕": "收入分配、公平正义、社会均衡",
-        "碳中和": "绿色发展、节能减排、低碳生活",
-        "教育改革": "双减政策、素质教育、教育公平",
-        "医疗健康": "医药改革、公共卫生、健康中国",
-        "就业创业": "就业优先、创业扶持、灵活就业",
-        "社会治理": "基层治理、网格化管理、矛盾化解",
-        "文化自信": "传统文化传承、文化创新、文化软实力",
-        "生态文明": "生态保护、美丽中国、可持续发展",
-        "一带一路": "对外开放、国际合作、互联互通",
-        "民生保障": "社会保障、住房保障、公共服务",
-        "基层治理": "社区治理、乡村治理、精细化管理",
-        "数据安全": "网络安全、数据保护、个人隐私",
-        "人工智能": "AI应用、智能化、人机协作",
-        "新能源": "清洁能源、新能源汽车、储能技术",
-        "老龄化": "养老服务、银发经济、健康养老",
-        "青年发展": "青年就业、青年成长、人才培养",
-    }
+    service = get_real_question_service()
+    fallback = service.get_question(category, exam_type, province)
 
-    category_templates = {
+    if fallback and not dedup.is_duplicate(fallback["content"]):
+        dedup.add_question(fallback["content"])
+        return fallback
+
+    # 扩大兜底题库：每类6道，耗尽后跨类别选题，确保 10 题内不重复
+    mock_pool = {
         "综合分析": [
-            "请谈谈你对'{topic}'的理解，结合实际分析其重要意义和实现路径。",
-            "{topic}已成为当前社会关注的热点，请你分析其面临的挑战及应对策略。",
-            "如何看待'{topic}'在新时代背景下的发展趋势？请谈谈你的认识。",
-            "请结合'{topic}'的发展现状，分析其对经济社会发展的影响。",
-            "'{topic}'是当前工作的重点，请谈谈你对推进这项工作的思考。",
+            "请谈谈你对当前经济高质量发展的理解，结合实际分析其重要意义和实现路径。",
+            "数字经济已成为推动社会发展的重要引擎，请分析其面临的挑战及应对策略。",
+            "乡村振兴是国家重大战略，请结合实际谈谈如何推进农村产业发展。",
+            "有人说基层治理是国家治理的基石，请谈谈你对这句话的看法。",
+            "当前社会上出现了一些躺平现象，请结合岗位谈谈你的认识。",
+            "共同富裕是社会主义的本质要求，请说说你的理解。",
         ],
         "人际沟通": [
-            "你在工作中与同事意见分歧较大，对方坚持自己的观点，你怎么办？",
-            "领导安排你接手同事未完成的工作，但同事态度不配合，你如何处理？",
-            "群众来办事时情绪激动，对办理结果不满意，你如何安抚并解决问题？",
-            "你作为新人，老同事总是把琐碎工作推给你，你如何处理？",
-            "跨部门协作中，其他部门不配合你的工作，你如何沟通协调？",
+            "你在工作中遇到同事不配合的情况，你如何处理？",
+            "领导安排你与同事合作，但对方态度消极，你怎么办？",
+            "你发现领导在工作中出现了失误，你会怎么处理？",
+            "群众到单位办事但不符合规定要求，情绪很激动，你怎么办？",
+            "与你有矛盾的同事被提拔为你的上级，你如何和他相处？",
+            "你安排的任务下属拒不执行，你会如何处理？",
         ],
         "应急应变": [
-            "你负责组织的重要活动突然遇到恶劣天气，活动无法按原计划进行，你怎么办？",
-            "你正在处理群众投诉时，又有新的群众情绪激动地赶来，你如何应对？",
-            "单位突发网络安全事件，数据面临泄露风险，你作为值班人员如何处理？",
-            "你在会议上汇报工作时，发现PPT内容有误，你如何处理？",
-            "领导交办的紧急任务与你手头的重要工作时间冲突，你怎么办？",
+            "你负责的活动即将开始时出现意外情况，你如何应对？",
+            "值班时接到紧急通知需要立即处理，你怎么办？",
+            "你单位组织的会议现场突然停电，你如何处置？",
+            "政务服务网突然宕机，大量办事群众聚集投诉，你怎么处理？",
+            "你陪同上级考察途中车辆发生剐蹭，对方司机要求赔偿，你怎么办？",
+            "你正在接待群众来访，突然接到家人电话说有急事，你怎么办？",
         ],
         "组织管理": [
-            "单位让你组织一次'{topic}'主题宣传活动，你如何组织？",
-            "领导要求你组织一次'{topic}'专题调研，你会如何开展？",
-            "请你策划一场'{topic}'主题的青年论坛活动，谈谈你的方案。",
-            "上级要来检查工作，领导让你负责接待和汇报，你如何准备？",
-            "如何组织开展'{topic}'相关的培训活动？请谈谈你的思路。",
+            "领导安排你组织一次业务培训，你如何开展？",
+            "请谈谈你组织一次调研活动的工作思路。",
+            "单位让你组织一场党史学习教育主题活动，你怎么做？",
+            "上级要求你单位开展营商环境大走访，你如何安排？",
+            "领导让你负责新公务员入职培训工作，你怎么组织？",
+            "社区要组织一次反诈宣传活动，请你设计方案。",
         ],
         "自我认知": [
-            "请介绍一下你的经历，以及这些经历如何帮助你胜任这个岗位？",
-            "你认为自己最大的优势是什么？这些优势如何在工作中发挥作用？",
-            "如果工作中遇到挫折，你会如何调整心态？请结合实例说明。",
-            "请谈谈你对'{topic}'的理解，以及你将如何在工作中践行？",
-            "你为什么选择报考我们单位？你的职业规划是什么？",
+            "请结合实际谈谈你的职业规划。",
+            "你认为报考这个岗位的优势是什么？",
+            "请说说你的缺点，以及你准备如何改进。",
+            "如果入职后发现工作内容和你预期的差别很大，你怎么办？",
+            "工作中你遇到的最大挫折是什么？你是如何克服的？",
+            "请结合你报考的岗位，谈谈对\"全心全意为人民服务\"的理解。",
         ],
     }
 
-    topic = random.choice(random_topics)
-    topic_desc = topic_descriptions.get(topic, "")
-    
-    templates = category_templates.get(category, category_templates["综合分析"])
-    random_template = random.choice(templates)
-    
-    topic_context = f"\n【背景素材】{topic}：{topic_desc}"
-
-    prompt = f"""你是一位资深公考面试出题专家，精通{exam_type}面试命题规律。请根据以下要求生成【仅一道】高质量面试题目：
-
-【题目类型】{category}
-【考试类型】{exam_type}
-{province and f"【省份】{province}" or ""}
-【参考话题】{topic}
-{topic_desc and f"【话题背景】{topic_desc}" or ""}
-
-命题要求（严格遵守）：
-1. 题目必须紧扣{category}的考察要点，具有针对性
-2. 结合{topic}相关的时政热点或社会现象，确保时效性和现实意义
-3. 难度1-5星，根据题目复杂度合理设置
-4. 参考答案思路要简明扼要，给出答题框架和关键点
-5. 严禁生成多道题目，只生成一道题
-
-参考题型示例（仅供参考，不要照搬）：
-{random_template}
-
-请严格按以下单个JSON对象格式返回（最外层只能有一对花括号，不要包含任何其他文本、代码块或解释）：
-{{
-    "content": "这道题的完整题目内容",
-    "difficulty": 3,
-    "answer_reference": "参考答案思路"
-}}"""
-
-    async def call_zhipu():
-        """调用智谱GLM生成题目"""
-        import time
-        import jwt as jwt_lib
-        import httpx
-
-        api_key = settings.ZHIPU_API_KEY
-        kid, secret = api_key.split(".")
-        payload = {
-            "api_key": kid,
-            "exp": int(time.time()) + 3600,
-            "timestamp": int(time.time()),
-        }
-        token = jwt_lib.encode(
-            payload, secret, algorithm="HS256", headers={"alg": "HS256", "sign_type": "SIGN"}
-        )
-
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-                json={
-                    "model": "glm-4-flash",
-                    "messages": [
-                        {"role": "system", "content": "你是一位资深公考面试出题专家，擅长生成高质量的公务员面试题目。请严格按照JSON格式返回结果。"},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.7,
-                },
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=60.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-
-    async def call_doubao():
-        """调用豆包生成题目"""
-        import httpx
-
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                settings.DOUBAO_API_URL,
-                json={
-                    "model": settings.LLM_MODEL or "doubao-pro",
-                    "messages": [
-                        {"role": "system", "content": "你是一位资深公考面试出题专家，擅长生成高质量的公务员面试题目。"},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.7,
-                },
-                headers={"Authorization": f"Bearer {settings.DOUBAO_API_KEY}"},
-                timeout=60.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if "choices" in data:
-                return data["choices"][0]["message"]["content"]
-            elif "output" in data:
-                return data["output"]
-            return str(data)
-
-    # 优先调用智谱GLM
-    response_text = ""
-    engine = "mock"
-    if settings.ZHIPU_API_KEY:
-        try:
-            response_text = await call_zhipu()
-            engine = "zhipu"
-        except Exception as e:
-            print(f"[出题] 智谱GLM调用失败: {e}")
-
-    # fallback到豆包
-    if not response_text and settings.DOUBAO_API_KEY:
-        try:
-            response_text = await call_doubao()
-            engine = "doubao"
-        except Exception as e:
-            print(f"[出题] 豆包调用失败: {e}")
-
-    # Mock兜底：增加丰富的题目库，避免重复
-    if not response_text:
-        mock_question_library = {
-            "综合分析": [
-                "请谈谈你对'高质量发展'的理解，结合实际分析其重要意义和实现路径。",
-                "数字经济已成为当前社会关注的热点，请你分析其面临的挑战及应对策略。",
-                "如何看待'乡村振兴'战略在新时代背景下的发展趋势？请谈谈你的认识。",
-                "请结合'科技创新'的发展现状，分析其对经济社会发展的影响。",
-                "'共同富裕'是当前工作的重点，请谈谈你对推进这项工作的思考。",
-                "如何理解'碳中和'目标的重要性？结合实际谈谈如何实现这一目标。",
-                "请分析'教育改革'面临的主要问题及解决思路。",
-                "如何看待'人工智能'在政务服务中的应用前景？",
-            ],
-            "人际沟通": [
-                "你在工作中与同事意见分歧较大，对方坚持自己的观点，你怎么办？",
-                "领导安排你接手同事未完成的工作，但同事态度不配合，你如何处理？",
-                "群众来办事时情绪激动，对办理结果不满意，你如何安抚并解决问题？",
-                "你作为新人，老同事总是把琐碎工作推给你，你如何处理？",
-                "跨部门协作中，其他部门不配合你的工作，你如何沟通协调？",
-                "领导批评你的工作方案存在问题，但你认为自己的方案是正确的，你怎么办？",
-                "同事在背后议论你的工作方式，你得知后如何处理？",
-                "你负责的工作出现失误，导致其他同事的工作受到影响，你如何处理？",
-            ],
-            "应急应变": [
-                "你负责组织的重要活动突然遇到恶劣天气，活动无法按原计划进行，你怎么办？",
-                "你正在处理群众投诉时，又有新的群众情绪激动地赶来，你如何应对？",
-                "单位突发网络安全事件，数据面临泄露风险，你作为值班人员如何处理？",
-                "你在会议上汇报工作时，发现PPT内容有误，你如何处理？",
-                "领导交办的紧急任务与你手头的重要工作时间冲突，你怎么办？",
-                "你在基层工作时，遇到群体性事件苗头，你如何处理？",
-                "单位重要文件丢失，领导让你负责调查处理，你怎么办？",
-                "你陪同领导视察工作时，群众突然围上来反映问题，你如何应对？",
-            ],
-            "组织管理": [
-                "单位让你组织一次'数字政府建设'主题宣传活动，你如何组织？",
-                "领导要求你组织一次'营商环境优化'专题调研，你会如何开展？",
-                "请你策划一场'青年干部成长'主题的论坛活动，谈谈你的方案。",
-                "上级要来检查工作，领导让你负责接待和汇报，你如何准备？",
-                "如何组织开展'安全生产'相关的培训活动？请谈谈你的思路。",
-                "请你组织一次单位内部的'业务技能比武'活动，你如何安排？",
-                "领导让你组织一次'我为群众办实事'实践活动，你如何策划？",
-                "如何组织开展'党史学习教育'活动？请谈谈你的方案。",
-            ],
-            "自我认知": [
-                "请介绍一下你的经历，以及这些经历如何帮助你胜任这个岗位？",
-                "你认为自己最大的优势是什么？这些优势如何在工作中发挥作用？",
-                "如果工作中遇到挫折，你会如何调整心态？请结合实例说明。",
-                "请谈谈你对'为人民服务'的理解，以及你将如何在工作中践行？",
-                "你为什么选择报考我们单位？你的职业规划是什么？",
-                "请谈谈你的缺点，以及你如何改进？",
-                "如果被录用，你如何快速适应新工作环境？",
-                "请谈谈你在大学期间最有成就感的一件事。",
-            ],
-        }
-        
-        questions = mock_question_library.get(category, mock_question_library["综合分析"])
-        random_question = random.choice(questions)
-        
+    # 1. 优先用指定分类下未用过的题
+    questions = mock_pool.get(category, mock_pool["综合分析"])
+    unused = [q for q in questions if not dedup.is_duplicate(q)]
+    if unused:
+        q = random.choice(unused)
+        dedup.add_question(q)
         return {
-            "content": random_question,
-            "difficulty": random.randint(2, 4),
-            "answer_reference": "（请结合实际情况作答）",
+            "content": q,
+            "difficulty": 3,
+            "answer_reference": "（请结合实际情况，分3-4个要点作答）",
             "category": category,
             "exam_type": exam_type,
             "province": province,
-            "status": "mock",
+            "source": "内置题库",
+            "status": "fallback",
         }
 
-    # 解析返回结果：提取第一个平衡的JSON对象（避免贪婪匹配把多道题串在一起）
-    def _extract_first_json(text: str):
-        text = text.strip()
-        # 去除可能的 ```json ... ``` 代码块包裹
-        m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
-        if m:
-            text = m.group(1).strip()
-        # 直接尝试解析
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-        # 用括号平衡方式提取第一个完整JSON对象
-        start = text.find('{')
-        if start == -1:
-            return None
-        depth = 0
-        in_str = False
-        escape = False
-        for i in range(start, len(text)):
-            ch = text[i]
-            if in_str:
-                if escape:
-                    escape = False
-                elif ch == '\\':
-                    escape = True
-                elif ch == '"':
-                    in_str = False
-            else:
-                if ch == '"':
-                    in_str = True
-                elif ch == '{':
-                    depth += 1
-                elif ch == '}':
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(text[start:i + 1])
-                        except json.JSONDecodeError:
-                            return None
-        return None
-
-    parsed = _extract_first_json(response_text)
-    if parsed and isinstance(parsed, dict) and parsed.get("content"):
-        content = str(parsed["content"]).strip()
-        
-        if content.startswith("{"):
-            try:
-                inner_parsed = json.loads(content)
-                if isinstance(inner_parsed, dict) and inner_parsed.get("content"):
-                    content = str(inner_parsed["content"]).strip()
-                    parsed["difficulty"] = inner_parsed.get("difficulty", parsed.get("difficulty", 3))
-                    parsed["answer_reference"] = inner_parsed.get("answer_reference", parsed.get("answer_reference", ""))
-            except json.JSONDecodeError:
-                pass
-        
-        multi_match = re.split(r'(?:第[一二三四五六七八九十\d]+题|题目[一二三四五六七八九十\d]+[:：])', content)
-        if len(multi_match) > 1:
-            content = multi_match[1].strip() if multi_match[1].strip() else content
+    # 2. 指定分类用完了，跨所有分类找一道未用过的
+    all_unused = [
+        (cat, q)
+        for cat, qs in mock_pool.items()
+        for q in qs
+        if not dedup.is_duplicate(q)
+    ]
+    if all_unused:
+        cat, q = random.choice(all_unused)
+        dedup.add_question(q)
         return {
-            "content": content,
-            "difficulty": parsed.get("difficulty", 3),
-            "answer_reference": parsed.get("answer_reference", ""),
-            "category": category,
+            "content": q,
+            "difficulty": 3,
+            "answer_reference": "（请结合实际情况，分3-4个要点作答）",
+            "category": cat,
             "exam_type": exam_type,
             "province": province,
-            "status": engine,
+            "source": "内置题库",
+            "status": "fallback-cross",
         }
 
+    # 3. 全部用完，才真随机（概率极低，只有一天刷 30+ 题才会触发）
+    cat = random.choice(list(mock_pool.keys()))
+    q = random.choice(mock_pool[cat])
     return {
-        "content": response_text,
+        "content": q,
         "difficulty": 3,
-        "answer_reference": "",
-        "category": category,
+        "answer_reference": "（请结合实际情况，分3-4个要点作答）",
+        "category": cat,
         "exam_type": exam_type,
         "province": province,
-        "status": engine,
+        "source": "内置题库",
+        "status": "fallback-random",
     }
