@@ -125,8 +125,20 @@ export function SinglePracticePage() {
       }
 
       setPhase('result')
-    } catch {
-      // If scoring fails, still show what we can
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || '评分服务异常，请稍后重试'
+      setScoreResult({
+        score_overall: 0,
+        score_analysis: 0,
+        score_expression: 0,
+        score_adaptability: 0,
+        score_organization: 0,
+        report_content: msg,
+        dimension_analysis: {},
+        deduction_points: '',
+        optimization_suggestions: '',
+        weights: { analysis: 0.30, expression: 0.25, adaptability: 0.25, organization: 0.20 },
+      })
       setPhase('result')
     } finally {
       setSubmitting(false)
