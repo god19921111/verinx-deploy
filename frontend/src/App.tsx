@@ -10,6 +10,12 @@ import { FullPracticePage } from './pages/FullPracticePage'
 import { HistoryPage } from './pages/HistoryPage'
 import { ReportPage } from './pages/ReportPage'
 import { MembershipPage } from './pages/MembershipPage'
+import { AnalysisPage } from './pages/AnalysisPage'
+import { WeaknessPage } from './pages/WeaknessPage'
+import { ProgressPage } from './pages/ProgressPage'
+import { CheckinPage } from './pages/CheckinPage'
+import { ChallengePage } from './pages/ChallengePage'
+import { AchievementsPage } from './pages/AchievementsPage'
 
 function App() {
   return (
@@ -26,6 +32,12 @@ function App() {
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/report/:id" element={<ReportPage />} />
           <Route path="/membership" element={<MembershipPage />} />
+          <Route path="/analysis" element={<AnalysisPage />} />
+          <Route path="/weakness" element={<WeaknessPage />} />
+          <Route path="/progress" element={<ProgressPage />} />
+          <Route path="/checkin" element={<CheckinPage />} />
+          <Route path="/challenge" element={<ChallengePage />} />
+          <Route path="/achievements" element={<AchievementsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
