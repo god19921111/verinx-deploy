@@ -1,4 +1,4 @@
-"""公考星 - 全局配置"""
+"""VerinX公考AI全真面试模拟 - 全局配置"""
 
 import os
 from pathlib import Path
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     PREMIUM_USER_FILE_RETENTION_DAYS: int = 30
 
     # 会员权限
-    FREE_DAILY_PRACTICE_LIMIT: int = 5
+    FREE_DAILY_PRACTICE_LIMIT: int = 3
     FREE_FOLLOW_UP_LIMIT: int = 1
     PREMIUM_FOLLOW_UP_LIMIT: int = 3
     MAX_FOLLOW_UP_PER_SESSION: int = 3
@@ -66,8 +66,16 @@ class Settings(BaseSettings):
     BAIDU_API_KEY: str = ""
     BAIDU_SECRET_KEY: str = ""
 
+    # 打卡与每日挑战
+    PREMIUM_UNLIMITED_DAILY_PRACTICE: bool = True
+
     # 智谱GLM配置（GLM-4-Flash完全免费）
     ZHIPU_API_KEY: str = ""
+
+    # 题库增量更新配置
+    QUESTION_BANK_CLOUD_URL: str = ""
+    QUESTION_BANK_AUTO_SYNC: bool = True
+    QUESTION_BANK_SYNC_INTERVAL_HOURS: int = 24
 
     # 短信验证码（MVP用模拟方式）
     SMS_ENABLED: bool = False
