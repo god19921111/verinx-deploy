@@ -14,6 +14,36 @@ export function ReportPage() {
   const [loading, setLoading] = useState(true)
   const [similarQuestions, setSimilarQuestions] = useState<any[]>([])
 
+  // 优秀答案对照
+  const [excellentData, setExcellentData] = useState<{
+    excellent_answer: string
+    answer_framework: string[]
+    comparison: {
+      strengths: string[]
+      gaps: string[]
+      improvement: string
+    }
+    key_phrases: string[]
+  } | null>(null)
+  const [excellentLoading, setExcellentLoading] = useState(false)
+  const [excellentError, setExcellentError] = useState<string>('')
+
+  const loadExcellentAnswer = async () => {
+    if (!id || excellentData || excellentLoading) return
+    setExcellentLoading(true)
+    setExcellentError('')
+    try {
+      const res = await api.get(`/stats/excellent-answer/${id}`)
+      const data = res.data.data || res.data
+      setExcellentData(data)
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || '生成失败，请稍后重试'
+      setExcellentError(msg)
+    } finally {
+      setExcellentLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!id) return
     setLoading(true)
@@ -170,6 +200,156 @@ export function ReportPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Excellent Answer Comparison (AI-generated, lazy loaded) */}
+      <Card className="mt-6">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>优秀答案对照</CardTitle>
+            {!excellentData && !excellentLoading && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={loadExcellentAnswer}
+                disabled={excellentLoading}
+              >
+                生成优秀答案
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {excellentLoading && (
+            <div className="py-8 text-center text-sm text-gray-500">
+              <div className="inline-block w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2 align-middle" />
+              AI 正在生成优秀答案与对比分析，请稍候...
+            </div>
+          )}
+
+          {!excellentLoading && excellentError && (
+            <div className="py-4 text-center">
+              <p className="text-sm text-red-500 mb-3">{excellentError}</p>
+              <Button variant="outline" size="sm" onClick={loadExcellentAnswer}>
+                重试
+              </Button>
+            </div>
+          )}
+
+          {!excellentLoading && !excellentData && !excellentError && (
+            <div className="py-6 text-center text-sm text-gray-500">
+              点击"生成优秀答案"，AI 将生成满分参考答案并与你的回答进行对比分析
+            </div>
+          )}
+
+          {excellentData && (
+            <div className="space-y-5">
+              {/* 优秀参考答案 */}
+              <div>
+                <div className="text-xs font-semibold text-green-600 mb-2 uppercase tracking-wide">
+                  优秀参考答案
+                </div>
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                  {excellentData.excellent_answer}
+                </p>
+              </div>
+
+              {/* 答题框架要点 */}
+              {excellentData.answer_framework && excellentData.answer_framework.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-blue-600 mb-2 uppercase tracking-wide">
+                    答题框架要点
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {excellentData.answer_framework.map((point, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs"
+                      >
+                        <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center mr-1.5">
+                          {i + 1}
+                        </span>
+                        {point}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 对比分析 */}
+              {excellentData.comparison && (
+                <div className="space-y-3">
+                  <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                    对比分析
+                  </div>
+
+                  {/* 亮点 */}
+                  {excellentData.comparison.strengths && excellentData.comparison.strengths.length > 0 && (
+                    <div className="p-3 bg-green-50 rounded-lg">
+                      <div className="text-xs font-medium text-green-700 mb-2 flex items-center gap-1">
+                        <span>✓</span> 回答亮点
+                      </div>
+                      <ul className="space-y-1.5">
+                        {excellentData.comparison.strengths.map((s, i) => (
+                          <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                            <span className="text-green-500 mt-0.5">•</span>
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 不足 */}
+                  {excellentData.comparison.gaps && excellentData.comparison.gaps.length > 0 && (
+                    <div className="p-3 bg-orange-50 rounded-lg">
+                      <div className="text-xs font-medium text-orange-700 mb-2 flex items-center gap-1">
+                        <span>!</span> 不足之处
+                      </div>
+                      <ul className="space-y-1.5">
+                        {excellentData.comparison.gaps.map((g, i) => (
+                          <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                            <span className="text-orange-500 mt-0.5">•</span>
+                            <span>{g}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 改进建议 */}
+                  {excellentData.comparison.improvement && (
+                    <div className="p-3 bg-blue-50 rounded-lg">
+                      <div className="text-xs font-medium text-blue-700 mb-1">提升路径</div>
+                      <p className="text-sm text-gray-700 leading-relaxed">
+                        {excellentData.comparison.improvement}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 金句推荐 */}
+              {excellentData.key_phrases && excellentData.key_phrases.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-purple-600 mb-2 uppercase tracking-wide">
+                    答题金句
+                  </div>
+                  <div className="space-y-2">
+                    {excellentData.key_phrases.map((phrase, i) => (
+                      <blockquote
+                        key={i}
+                        className="pl-3 border-l-2 border-purple-400 text-sm text-gray-700 italic"
+                      >
+                        {phrase}
+                      </blockquote>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Follow-up History */}
       {record.follow_ups && record.follow_ups.length > 0 && (
