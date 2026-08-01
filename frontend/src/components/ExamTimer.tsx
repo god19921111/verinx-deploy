@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { sfx } from '@/lib/sfx'
 
 interface ExamTimerProps {
   mode: 'thinking' | 'answering'
@@ -48,8 +49,17 @@ export function ExamTimer({ mode, maxSeconds, onTimeout, isRunning }: ExamTimerP
       setRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(interval)
+          sfx.timeUp()
           handleTimeout()
           return 0
+        }
+        // 最后10秒滴答
+        if (prev <= 10) {
+          if (prev <= 3) {
+            sfx.tickUrgent()
+          } else {
+            sfx.tick()
+          }
         }
         return prev - 1
       })
