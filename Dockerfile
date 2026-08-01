@@ -1,13 +1,25 @@
 # ============================================================
-# VerinX · Hugging Face Spaces 后端 Dockerfile（根目录版）
-# 平台：Hugging Face Spaces (Docker SDK)
-# 免费配置：2核CPU + 16GB内存 + 50GB持久存储
-# 说明：backend/ 子目录包含完整后端代码，此 Dockerfile 负责构建
+# VerinX · Zeabur 单体部署 Dockerfile
+# 前后端打包在一个容器中，使用 SQLite，无需额外数据库
 # ============================================================
 
+# ---- 阶段1: 构建前端 ----
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /build
+
+# 先复制依赖文件，利用 Docker 层缓存
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+
+# 复制前端源码并构建
+COPY frontend/ .
+RUN npm run build
+
+# ---- 阶段2: 后端 + 前端静态文件 ----
 FROM python:3.11-slim
 
-# 系统依赖（funasr/torch 需要的音频处理库 + ffmpeg）
+# 系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
@@ -16,23 +28,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 先复制 requirements 并安装依赖（利用 Docker 层缓存）
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 安装 Python 依赖（使用精简版，不含 funasr/torch）
+COPY backend/requirements-deploy.txt .
+RUN pip install --no-cache-dir -r requirements-deploy.txt
 
-# 预下载 FunASR SenseVoice 模型（避免运行时首次加载超时）
-RUN python -c "from funasr import AutoModel; AutoModel(model='iic/SenseVoiceSmall', vad_model='fsmn-vad', punc_model='ct-punc-c', device='cpu', disable_pbar=True, disable_log=True)" || echo "模型预下载失败，将在运行时按需加载"
-
-# 复制后端全部代码到 /app 根目录
+# 复制后端代码
 COPY backend/ .
 
-# 创建上传目录
+# 复制前端构建产物到 /frontend/dist（main.py 中 FRONTEND_DIST 路径对应）
+COPY --from=frontend-builder /build/dist /frontend/dist
+
+# 创建数据目录（SQLite 数据库 + 上传文件）
 RUN mkdir -p /data/uploads
+
+# 环境变量默认值（Zeabur 部署时可在控制台覆盖）
+ENV DATABASE_URL=sqlite:////data/verinx.db
 ENV UPLOAD_DIR=/data/uploads
+ENV DEBUG=False
+ENV JWT_SECRET_KEY=verinx-zeabur-secret-2026
+ENV DOUBAO_API_URL=https://ark.cn-beijing.volces.com/api/v3/chat/completions
 
-# HF Spaces 强制使用 7860 端口
-ENV PORT=7860
-EXPOSE 7860
+EXPOSE 8000
 
-# 启动命令
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
