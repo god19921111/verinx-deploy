@@ -1,11 +1,13 @@
-"""公考星·AI全真面试模拟 - FastAPI 应用入口"""
+"""VerinX公考AI全真面试模拟 - FastAPI 应用入口"""
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import select, func
 
 from app.config import settings
@@ -82,7 +84,7 @@ QUESTIONS_DATA = [
 
 
 async def init_questions(db):
-    """初始化题库数据"""
+    """初始化题库数据并加载到去重池"""
     result = await db.execute(select(func.count(Question.id)))
     count = result.scalar()
     if count == 0:
@@ -93,6 +95,17 @@ async def init_questions(db):
             )
             db.add(question)
         await db.commit()
+
+    # 加载所有题目到去重池（防止进程重启后重复出题）
+    from app.services.dedup import get_deduplicator
+    result = await db.execute(select(Question.content))
+    contents = result.scalars().all()
+    dedup = get_deduplicator()
+    loaded = 0
+    for content in contents:
+        if content and dedup.add_question(content):
+            loaded += 1
+    print(f"[启动] 已加载 {loaded} 道题目到去重池")
 
 
 @asynccontextmanager
@@ -107,11 +120,20 @@ async def lifespan(app: FastAPI):
         await init_questions(session)
         await session.close()
 
-    # 启动时异步刷新题目缓存池
-    import asyncio
-    from app.services.question_pool import get_question_pool
-    pool = get_question_pool()
-    asyncio.create_task(pool.refresh_pool())
+    # 静默同步云端增量题库（联网时自动下载新题，失败不报错）
+    from app.services.real_questions import get_real_question_service
+    from app.config import settings
+
+    if settings.QUESTION_BANK_AUTO_SYNC:
+        try:
+            service = get_real_question_service()
+            sync_result = service.try_sync()
+            if sync_result.get("synced"):
+                print(f"[启动] 题库增量同步成功，新增 {sync_result.get('added', 0)} 题")
+            else:
+                print(f"[启动] 题库同步跳过: {sync_result.get('reason', '')}")
+        except Exception as e:
+            print(f"[启动] 题库同步异常（不影响服务）: {e}")
 
     yield
 
@@ -122,17 +144,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS：支持通过环境变量配置多域名（生产部署用）
-_cors_env = os.environ.get("CORS_ALLOW_ORIGINS", "")
-if _cors_env:
-    _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
-else:
-    _cors_origins = ["http://localhost:5173", "http://localhost:3000"]
-
+# CORS：支持所有来源（本地部署用）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -143,7 +158,7 @@ app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads"
 
 
 # ---------- 路由注册 ----------
-from app.routers import auth, user, question, practice, upload, ai  # noqa: E402
+from app.routers import auth, user, question, practice, upload, ai, stats  # noqa: E402
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(user.router, prefix="/api/user", tags=["用户"])
@@ -151,8 +166,23 @@ app.include_router(question.router, prefix="/api/questions", tags=["题库"])
 app.include_router(practice.router, prefix="/api/practice", tags=["练习"])
 app.include_router(upload.router, prefix="/api/upload", tags=["文件上传"])
 app.include_router(ai.router, prefix="/api/ai", tags=["AI服务"])
+app.include_router(stats.router, prefix="/api/stats", tags=["统计分析"])
 
 
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "version": settings.APP_VERSION}
+
+
+# 前端静态文件服务（SPA fallback）
+FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        file_path = FRONTEND_DIST / full_path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(FRONTEND_DIST / "index.html"))
