@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 interface ScoreCardProps {
   overall: number
@@ -25,6 +25,7 @@ interface ScoreCardProps {
   }
   deductionPoints?: string
   optimizationSuggestions?: string
+  answerReference?: string
 }
 
 const dimensionLabels: Record<string, string> = {
@@ -41,10 +42,10 @@ function getScoreColor(score: number): string {
 }
 
 function getScoreLevel(score: number): { label: string; color: string } {
-  if (score >= 80) return { label: 'EXCELLENT', color: 'text-[#F0F0FA]' }
-  if (score >= 70) return { label: 'GOOD', color: 'text-[rgba(240,240,250,0.8)]' }
-  if (score >= 60) return { label: 'PASS', color: 'text-[rgba(240,240,250,0.7)]' }
-  return { label: 'IMPROVE', color: 'text-[rgba(240,240,250,0.5)]' }
+  if (score >= 80) return { label: '稳了', color: 'text-[#F0F0FA]' }
+  if (score >= 70) return { label: '有料', color: 'text-[rgba(240,240,250,0.8)]' }
+  if (score >= 60) return { label: '凑合', color: 'text-[rgba(240,240,250,0.7)]' }
+  return { label: '得练', color: 'text-[rgba(240,240,250,0.5)]' }
 }
 
 function DimensionBar({ keyName, score, weight, analysis }: { keyName: string; score: number; weight: number; analysis?: string }) {
@@ -101,9 +102,31 @@ function DimensionBar({ keyName, score, weight, analysis }: { keyName: string; s
   )
 }
 
-export function ScoreCard({ overall, scores, weights, reportContent, dimensionAnalysis, deductionPoints, optimizationSuggestions }: ScoreCardProps) {
+function useCountUp(target: number, duration = 1200): number {
+  const [val, setVal] = useState(0)
+  useEffect(() => {
+    let raf = 0
+    const start = performance.now()
+    const tick = (now: number) => {
+      const elapsed = now - start
+      const progress = Math.min(elapsed / duration, 1)
+      // easeOutCubic
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setVal(Math.round(target * eased))
+      if (progress < 1) {
+        raf = requestAnimationFrame(tick)
+      }
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, duration])
+  return val
+}
+
+export function ScoreCard({ overall, scores, weights, reportContent, dimensionAnalysis, deductionPoints, optimizationSuggestions, answerReference }: ScoreCardProps) {
   const dimensions = Object.keys(scores) as (keyof typeof scores)[]
   const level = getScoreLevel(overall)
+  const animatedScore = useCountUp(overall)
 
   return (
     <div className="border border-[rgba(240,240,250,0.35)]">
@@ -111,7 +134,7 @@ export function ScoreCard({ overall, scores, weights, reportContent, dimensionAn
         <div className="flex items-center gap-3">
           <div className="w-2 h-2 bg-[#F0F0FA] animate-pulse" />
           <span className="text-xs uppercase-spacex tracking-[0.2em] text-[#808080]">
-            SCORE REPORT
+            VERINX SAYS
           </span>
         </div>
       </div>
@@ -122,7 +145,7 @@ export function ScoreCard({ overall, scores, weights, reportContent, dimensionAn
         </div>
         <div className="flex items-baseline justify-center gap-4">
           <span className="text-8xl font-bold tabular-nums text-[#F0F0FA]">
-            {overall}
+            {animatedScore}
           </span>
           <span className="text-xs uppercase-spacex tracking-[0.2em]">
             / 100
@@ -133,7 +156,7 @@ export function ScoreCard({ overall, scores, weights, reportContent, dimensionAn
           {level.label}
         </div>
         <p className="mt-4 text-xs text-[#808080] uppercase-spacex tracking-[0.1em]">
-          FOUR DIMENSION ANALYSIS
+          四维拆解
         </p>
       </div>
 
@@ -142,10 +165,10 @@ export function ScoreCard({ overall, scores, weights, reportContent, dimensionAn
           <div className="flex items-center gap-3 mb-4">
             <div className="w-1 h-4 bg-[#F0F0FA]" />
             <span className="text-xs uppercase-spacex tracking-[0.2em] text-[#808080]">
-              EXAMINER COMMENT
+              VERINX 直接说
             </span>
           </div>
-          <p className="text-[rgba(240,240,250,0.8)] font-body leading-relaxed">
+          <p className="text-[rgba(240,240,250,0.85)] font-body leading-relaxed">
             {reportContent}
           </p>
         </div>
@@ -155,7 +178,7 @@ export function ScoreCard({ overall, scores, weights, reportContent, dimensionAn
         <div className="flex items-center gap-3 mb-6">
           <div className="w-1 h-4 bg-[#F0F0FA]" />
           <span className="text-xs uppercase-spacex tracking-[0.2em] text-[#808080]">
-            DIMENSION ANALYSIS
+            四维拆解
           </span>
         </div>
         <div className="space-y-4">
@@ -176,8 +199,8 @@ export function ScoreCard({ overall, scores, weights, reportContent, dimensionAn
           <div className="flex items-center gap-3 mb-4">
             <div className="w-1 h-4 bg-[rgba(239,68,68,0.9)]" />
             <span className="text-xs uppercase-spacex tracking-[0.2em] text-[rgba(239,68,68,0.9)]">
-              AREAS TO IMPROVE
-            </span>
+            硬伤
+          </span>
           </div>
           <ul className="space-y-3">
             {deductionPoints.split('；').map((point, idx) => {
@@ -201,8 +224,8 @@ export function ScoreCard({ overall, scores, weights, reportContent, dimensionAn
           <div className="flex items-center gap-3 mb-4">
             <div className="w-1 h-4 bg-[#F0F0FA]" />
             <span className="text-xs uppercase-spacex tracking-[0.2em] text-[#F0F0FA]">
-              RECOMMENDATIONS
-            </span>
+            怎么改
+          </span>
           </div>
           <ul className="space-y-3">
             {optimizationSuggestions.split('；').map((point, idx) => {
@@ -218,6 +241,20 @@ export function ScoreCard({ overall, scores, weights, reportContent, dimensionAn
               )
             })}
           </ul>
+        </div>
+      )}
+
+      {answerReference && (
+        <div className="border-t border-[rgba(240,240,250,0.35)] p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-1 h-4 bg-[rgba(34,197,94,0.9)]" />
+            <span className="text-xs uppercase-spacex tracking-[0.2em] text-[rgba(34,197,94,0.9)]">
+              答题思路
+            </span>
+          </div>
+          <p className="text-sm text-[rgba(240,240,250,0.7)] font-body leading-relaxed whitespace-pre-line">
+            {answerReference}
+          </p>
         </div>
       )}
     </div>
